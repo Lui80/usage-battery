@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { Register } from 'claude-code'
+import type { EngineInterface, Register } from 'claude-code'
 
 import type { Limit } from '../types'
 
@@ -48,6 +48,29 @@ function untilReset(resetsAt: string | undefined, now: number) {
   return ` · ${mins}분 후 초기화`
 }
 
+// 모바일 앱은 입력창 위 칸(AbovePrompt)을 그리지 않아서, 상태줄에 텍스트로 보여준다
+function textLine(current: Limit[]) {
+  return WINDOWS.map(({ kind, label }) => {
+    const limit = current.find(l => l.kind === kind)
+    if (!limit) return `${label} ${'▱'.repeat(CELLS)} 대기 중`
+
+    const filled = filledCells(limit.percentUsed)
+
+    return `${label} ${'▰'.repeat(filled)}${'▱'.repeat(CELLS - filled)} ${Math.round(limit.percentUsed)}%`
+  }).join(' · ')
+}
+
+async function refreshMobileStatus($: EngineInterface) {
+  const surfaces = await $.session.surfaces()
+  if (!surfaces.includes('mobile')) {
+    $.ui.status(undefined)
+
+    return
+  }
+
+  $.ui.status(textLine(await read($, limits)))
+}
+
 function pick(rateLimits: Limit[]): Limit[] {
   return rateLimits.map(({ kind, percentUsed, resetsAt }) => ({ kind, percentUsed, resetsAt }))
 }
@@ -56,6 +79,7 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const usage = await $.session.usage()
     await update($, limits, () => pick(usage.rateLimits))
+    await refreshMobileStatus($)
 
     return next(e)
   })
@@ -63,9 +87,24 @@ export const register: Register = on => {
   on('session.measure', async ($, e, next) => {
     if (e.changed.includes('rateLimits')) {
       await update($, limits, () => pick(e.rateLimits))
+      await refreshMobileStatus($)
     }
 
     return next(e)
+  })
+
+  on('session.attach', async ($, e, next) => {
+    const result = await next(e)
+    await refreshMobileStatus($)
+
+    return result
+  })
+
+  on('session.detach', async ($, e, next) => {
+    const result = await next(e)
+    if (e.reason !== 'end') await refreshMobileStatus($)
+
+    return result
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
