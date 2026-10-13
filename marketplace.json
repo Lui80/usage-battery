@@ -1,0 +1,5 @@
+{
+  "name": "usage-battery-mods",
+  "owner": { "name": "ramadal80" },
+  "plugins": [{ "name": "usage-battery", "source": "./" }]
+}
